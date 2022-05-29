@@ -1,0 +1,205 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+# -*- mode: python -*-
+# vi: set ft=python :
+
+import argparse
+import math
+
+from collections import OrderedDict
+from datetime import date, timedelta
+from itertools import islice
+
+
+from colorama import init, Fore, Style
+from git import Repo
+
+
+init()
+
+BIN = [None] * 4
+BIN[0] = '■' + Style.RESET_ALL
+BIN[1] =    Style.DIM + Fore.GREEN + BIN[0]
+BIN[2] = Style.NORMAL + Fore.GREEN + BIN[0]
+BIN[3] = Style.BRIGHT + Fore.GREEN + BIN[0]
+
+
+def parse_args():
+    p = argparse.ArgumentParser(
+        description='Show git contributions over time a la GitHub'
+    )
+
+    p.add_argument('repo', nargs='?', default='.',
+                   help='Specify repo to examine')
+    # TODO: allow specify branch -- default to active_branch
+    p.add_argument('--start', help='date to start')
+
+    return p.parse_args()
+
+
+def commits_per_day(repo, start_date):
+    """
+    return dict of 'date': 'commit_count', in date-increasing order
+    """
+    # for date increasing order, we can rely on dict returning keys in creation
+    # order. so start with oldest first
+    commit_counts = OrderedDict()
+    date_index = date.fromisoformat(start_date)
+    last_date = date.today()
+    one_day = timedelta(days=1)
+
+    while date_index <= last_date:
+        next_date = date_index + one_day
+        commits = repo.iter_commits(after=date_index.isoformat(),
+                                    before=next_date.isoformat())
+        commit_counts[date_index] = len(list(commits))
+
+        date_index = next_date
+
+    return commit_counts
+
+
+def normalized_commits_per_day(cpd):
+    """
+    calculate each days' weight as fraction of overall max
+    return dict of 'date': 'normalized_commit_count', in date-increasing order
+    """
+    max_commits = max(cpd.values())
+    return {contrib_date: commits/max_commits
+            for contrib_date, commits
+            in cpd.items()}
+
+
+def binned_commits_per_day(normalized_cpd):
+    """
+    map fractional weighting into bin
+    return dict of 'date': 'binned_commit_count', in date-increasing order
+    """
+    return {contrib_date: number_bin(normalized_commits)
+            for contrib_date, normalized_commits
+            in normalized_cpd.items()}
+
+
+def number_bin(contrib_weight):
+    """
+    """
+    return math.floor((contrib_weight * len(BIN)) % len(BIN))
+
+
+def color_bin(number_bin):
+    """
+    map bin/quartile into color block
+    """
+    return BIN[number_bin]
+
+
+def first(i):
+    return next(iter(i))
+
+
+def month_headers(start_date):
+    months = ['Jan', 'Feb', 'Mar', 'Apr',
+              'May', 'Jun', 'Jul', 'Aug',
+              'Sep', 'Oct', 'Nov', 'Dec']
+    current_month = start_date.month  # Between 1 and 12 inclusive
+
+    # rotate months
+    index = 0
+    while index < current_month:
+        months.append(months.pop(0))
+        index += 1
+
+    return " " * 4 + "".join(f"{month:^9}" for month in months)
+    # not a great algo -- there's 52 weeks, with a space between each, so
+    # that's 103 columns.  103/12 = 8.583, so 9 will cause weird spacing.
+    # TODO: do this better
+
+
+def day_offset(day, start_weekday):
+    """
+    rows are Sun->Sat, but the data starts on "random weekday".  Calculate
+    the num days until next Sunday
+    """
+    return (day - start_weekday) % 7
+
+
+def day_of_week(day, bcpd):
+    """
+    render row for this week:  day name + colored commit weight for each day
+    """
+    row_buffer = []
+
+    # 0 is Sunday; 6 is Saturday
+    start_weekday = first(bcpd).isoweekday() % 7
+
+    # Add row header (day of week)
+    if day == 1:
+        row_buffer.append('Mon')
+    elif day == 3:
+        row_buffer.append('Wed')
+    elif day == 5:
+        row_buffer.append('Fri')
+    else:
+        row_buffer.append(' ' * 3)
+
+    # First week may need padding...  i.e if Activity run on Wednesday
+    # then, have to blank Sun/Mon/Tue in the first week's column
+    if day < start_weekday:
+        row_buffer.append(' ')
+
+    # Add row data points
+    offset = day_offset(day, start_weekday)
+    # islice to get every seventh date
+    for binning in islice(bcpd.values(), offset, None, 7):
+        row_buffer.append(color_bin(binning))
+
+    # row_buffer should look like:  ['Mon', 'X0', 'X3', 'X0', ...]
+    return " ".join(row_buffer)
+
+
+def legend(min, max):
+    """
+    expect to receive weight range -- min to max
+    """
+    return f" Less [{min}] {BIN[0]} {BIN[1]} {BIN[2]} {BIN[3]} [{max}] More"
+
+
+def chart(binned_commits_per_day, max):
+    """
+    print chart of activity: height is day-of-week, width is week of
+    year (labeled by month), and data point is color gradation (dull is
+    zero count of commits that day; brightest is max commit value).
+    """
+    chart_rows = []  # a buffer for the output
+    start_date = first(binned_commits_per_day)
+
+    # construct chart row by row
+    chart_rows.append(month_headers(start_date))
+    for day in range(0, 7):
+        chart_rows.append(day_of_week(day, binned_commits_per_day))
+    chart_rows.append("")  # blank line before legend
+    chart_rows.append(legend(0, max))
+
+    for row in chart_rows:
+        print(row)
+
+
+def main():
+    args = parse_args()
+
+    if args.start:
+        start = args.start
+    else:
+        start_date = date.today() - timedelta(days=365)
+        start = start_date.isoformat()
+
+    repo = Repo(args.repo)
+    cpd = commits_per_day(repo, start)
+    max_commits = max(cpd.values())
+    ncpd = normalized_commits_per_day(cpd)
+    bcpd = binned_commits_per_day(ncpd)
+    chart(bcpd, max_commits)
+
+
+if __name__ == "__main__":
+    main()
