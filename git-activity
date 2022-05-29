@@ -5,6 +5,7 @@
 
 import argparse
 import math
+import time
 
 from collections import OrderedDict
 from datetime import date, timedelta
@@ -44,17 +45,21 @@ def commits_per_day(repo, start_date):
     # for date increasing order, we can rely on dict returning keys in creation
     # order. so start with oldest first
     commit_counts = OrderedDict()
+
     date_index = date.fromisoformat(start_date)
     last_date = date.today()
     one_day = timedelta(days=1)
 
+    # init output-dict with all days at 0
     while date_index <= last_date:
-        next_date = date_index + one_day
-        commits = repo.iter_commits(after=date_index.isoformat(),
-                                    before=next_date.isoformat())
-        commit_counts[date_index] = len(list(commits))
+        commit_counts[date_index] = 0
+        date_index = date_index + one_day
 
-        date_index = next_date
+    # Grab commits from start_date and then count up by date
+    for commit in repo.iter_commits(after=start_date):
+        commit_date = date.fromisoformat(time.strftime("%Y-%m-%d",
+                                         time.gmtime(commit.committed_date)))
+        commit_counts[commit_date] += 1
 
     return commit_counts
 
