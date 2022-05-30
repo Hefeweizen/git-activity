@@ -38,6 +38,20 @@ def parse_args():
     return p.parse_args()
 
 
+def list_dates(start_date):
+    """
+    print dates from start_date to today
+    """
+    date_index = date.fromisoformat(start_date)
+    last_date = date.today()
+    one_day = timedelta(days=1)
+
+    # init output-dict with all days at 0
+    while date_index <= last_date:
+        yield date_index
+        date_index = date_index + one_day
+
+
 def commits_per_day(repo, start_date):
     """
     return dict of 'date': 'commit_count', in date-increasing order
@@ -46,14 +60,8 @@ def commits_per_day(repo, start_date):
     # order. so start with oldest first
     commit_counts = OrderedDict()
 
-    date_index = date.fromisoformat(start_date)
-    last_date = date.today()
-    one_day = timedelta(days=1)
-
-    # init output-dict with all days at 0
-    while date_index <= last_date:
+    for date_index in list_dates(start_date):
         commit_counts[date_index] = 0
-        date_index = date_index + one_day
 
     # Grab commits from start_date and then count up by date
     for commit in repo.iter_commits(after=start_date):
