@@ -44,10 +44,13 @@ def commits_per_day(repo, start_date):
     df = pd.DataFrame((co.committed_date for co in commits),
                       columns=['committed_date'])
     df['committed_date'] = pd.to_datetime(df['committed_date'], unit='s')
+
     df = df.groupby([df['committed_date'].dt.date]).count()
     df = df.rename(columns={'committed_date': 'count'})
-    df.index = pd.DatetimeIndex(df.index)
-    date_idx = pd.date_range(start=start_date, end="2022-05-30")
+
+    # fill in missing dates
+    today = date.today().isoformat()
+    date_idx = pd.date_range(start=start_date, end=today)
     df = df.reindex(date_idx, fill_value=0)
 
     df['bin'] = pd.cut(df['count'], bins=len(BIN), labels=range(len(BIN)))
