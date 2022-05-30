@@ -4,7 +4,6 @@
 # vi: set ft=python :
 
 import argparse
-import time
 
 from datetime import date, timedelta
 
@@ -41,15 +40,15 @@ def commits_per_day(repo, start_date):
     """
     return DataFrame of 'date', 'count', 'bin' indexed by date
     """
-    date_idx = pd.date_range(start=start_date, end="2022-05-29")
-    df = pd.DataFrame({'count': 0, 'date': date_idx})
-    df = df.set_index('date')
-
-    # Grab commits from start_date and then count up by date
-    for commit in repo.iter_commits(after=start_date):
-        commit_date = pd.to_datetime(time.strftime("%Y-%m-%d",
-                                     time.gmtime(commit.committed_date)))
-        df['count'][commit_date] += 1
+    commits = repo.iter_commits(after=start_date)
+    df = pd.DataFrame((co.committed_date for co in commits),
+                      columns=['committed_date'])
+    df['committed_date'] = pd.to_datetime(df['committed_date'], unit='s')
+    df = df.groupby([df['committed_date'].dt.date]).count()
+    df = df.rename(columns={'committed_date': 'count'})
+    df.index = pd.DatetimeIndex(df.index)
+    date_idx = pd.date_range(start=start_date, end="2022-05-30")
+    df = df.reindex(date_idx, fill_value=0)
 
     df['bin'] = pd.cut(df['count'], bins=len(BIN), labels=range(len(BIN)))
     return df
@@ -88,8 +87,8 @@ def day_of_week(day, cpd):
     row_buffer = []
 
     # 0 is Sunday; 6 is Saturday
-    start_idx = cpd.first('1D').index
-    start_weekday = (start_idx.dayofweek + 1) % 7
+    start_idx = cpd.first_valid_index()
+    start_weekday = (start_idx.isoweekday()) % 7
 
     # Add row header (day of week)
     if day == 1:
@@ -108,7 +107,8 @@ def day_of_week(day, cpd):
 
     # day_of_week_filter
     # a filter to pull all indices that align to input day
-    dow_filter = ((cpd.index.dayofweek + 1) % 7) == day
+    idx = cpd.index.astype('datetime64[ns]')
+    dow_filter = ((idx.dayofweek + 1) % 7) == day
     # Add row data points
     for day_bin in cpd[dow_filter]['bin'].tolist():
         row_buffer.append(color_bin(day_bin))
